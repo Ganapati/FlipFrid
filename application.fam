@@ -1,0 +1,11 @@
+App(
+    appid="flip_frid_app",
+    name="Flip/Frid",
+    apptype=FlipperAppType.APP,
+    entry_point="flipfrid_app",
+    cdefines=["APP_FLIP_FRID"],
+    requires=["gui"],
+    stack_size=1 * 1024,
+    icon="A_125khz_14",
+    order=30,
+)
