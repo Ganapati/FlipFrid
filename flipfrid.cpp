@@ -50,7 +50,6 @@ typedef struct {
 } FlipFridState;
 
 void emit(int index, RfidTimerEmulator emulator, LfrfidKeyType type) {
-
     printf("%s", lfrfid_key_get_type_string(type));
     printf(" ");
     for(uint8_t i = 0; i < lfrfid_key_get_type_data_count(type); i++) {
@@ -244,7 +243,7 @@ void FlipFridApp::run() {
                         // Next badge type
                         flipfrid_state->emulator.stop();
                         flipfrid_state->emitting = false;
-                        if(badge_type_index < (sizeof(badges_types) / sizeof(badges_types[0]))) {
+                        if(badge_type_index < (sizeof(badges_types) / sizeof(badges_types[0])-1)) {
                             badge_type_index++;
                             flipfrid_state->current_badge_type = badges_types[badge_type_index];
                         }
