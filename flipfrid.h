@@ -2,6 +2,7 @@
 
 class FlipFridApp {
 public:
+    ~FlipFridApp();
     FlipFridApp();
     void run();
 };

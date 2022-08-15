@@ -9,7 +9,7 @@
 #define MAX_REPEAT 3
 #define TAG "FLIPFRID"
 
-uint8_t em_id_list[12][5] = {
+uint8_t id_list[12][5] = {
     {0x00, 0x00, 0x00, 0x00, 0x00}, // Default uid
     {0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, // Only FF
     {0x11, 0x11, 0x11, 0x11, 0x11}, // Only 11
@@ -24,33 +24,46 @@ uint8_t em_id_list[12][5] = {
     {0x12, 0x34, 0x56, 0x78, 0x9A}, // Incremental UID
 };
 
+typedef struct {
+    LfrfidKeyType type;
+    char* name;
+} Badges;
+
 typedef enum {
     EventTypeTick,
     EventTypeKey,
 } EventType;
 
+typedef struct {
+    EventType evt_type;
+    InputKey key;
+    InputType input_type;
+} FlipFridEvent;
+
 // STRUCTS
 typedef struct {
+    bool emitting;
+    LfrfidKeyType current_badge_type;
     uint8_t current_uid;
     uint8_t current_uid_repeat;
     RfidTimerEmulator emulator;
 } FlipFridState;
 
-typedef struct {
-    EventType type;
-    InputEvent input;
-} Event;
+void emit(int index, RfidTimerEmulator emulator, LfrfidKeyType type) {
 
-void emit(uint8_t uid[], RfidTimerEmulator emulator) {
-    FURI_LOG_I(TAG, "Emit func");
+    printf("%s", lfrfid_key_get_type_string(type));
+    printf(" ");
+    for(uint8_t i = 0; i < lfrfid_key_get_type_data_count(type); i++) {
+        printf("%02X", id_list[index][i]);
+    }
+    printf("\r\n");
+
     emulator.stop();
-    emulator.start(
-        LfrfidKeyType::KeyEM4100, uid, lfrfid_key_get_type_data_count(LfrfidKeyType::KeyEM4100));
+    emulator.start(type, id_list[index], lfrfid_key_get_type_data_count(type));
 }
 
 static void flipfrid_draw_callback(Canvas* const canvas, void* ctx) {
-    const FlipFridState* flipfrid_state = (FlipFridState*)acquire_mutex((ValueMutex*)ctx, 25);
-    UNUSED(ctx);
+    const FlipFridState* flipfrid_state = (FlipFridState*)acquire_mutex((ValueMutex*)ctx, 100);
 
     if(flipfrid_state == NULL) {
         return;
@@ -66,61 +79,111 @@ static void flipfrid_draw_callback(Canvas* const canvas, void* ctx) {
     canvas_set_font(canvas, FontPrimary);
     canvas_draw_str_aligned(canvas, 64, 8, AlignCenter, AlignTop, "Flip/Frid");
 
-    // UID
-    canvas_set_font(canvas, FontSecondary);
+    // Badge Type
     char uid[15];
-    snprintf(
-        uid,
-        sizeof(uid),
-        "%X:%X:%X:%X:%X",
-        em_id_list[flipfrid_state->current_uid][0],
-        em_id_list[flipfrid_state->current_uid][1],
-        em_id_list[flipfrid_state->current_uid][2],
-        em_id_list[flipfrid_state->current_uid][3],
-        em_id_list[flipfrid_state->current_uid][4]);
-    canvas_draw_str_aligned(canvas, 64, 32, AlignCenter, AlignCenter, uid);
+    char badge_type[12];
+    switch(flipfrid_state->current_badge_type) {
+    case LfrfidKeyType::KeyEM4100:
+        strcpy(badge_type, "  EM4100 >");
+        snprintf(
+            uid,
+            sizeof(uid),
+            "%X:%X:%X:%X:%X",
+            id_list[flipfrid_state->current_uid][0],
+            id_list[flipfrid_state->current_uid][1],
+            id_list[flipfrid_state->current_uid][2],
+            id_list[flipfrid_state->current_uid][3],
+            id_list[flipfrid_state->current_uid][4]);
+        break;
+    case LfrfidKeyType::KeyH10301:
+        strcpy(badge_type, "< HID26 >");
+        snprintf(
+            uid,
+            sizeof(uid),
+            "%X:%X:%X",
+            id_list[flipfrid_state->current_uid][0],
+            id_list[flipfrid_state->current_uid][1],
+            id_list[flipfrid_state->current_uid][2]);
+        break;
+    case LfrfidKeyType::KeyI40134:
+        strcpy(badge_type, "< Indala >");
+        snprintf(
+            uid,
+            sizeof(uid),
+            "%X:%X:%X",
+            id_list[flipfrid_state->current_uid][0],
+            id_list[flipfrid_state->current_uid][1],
+            id_list[flipfrid_state->current_uid][2]);
+        break;
+    case LfrfidKeyType::KeyIoProxXSF:
+        strcpy(badge_type, "< IoProxs  ");
+        snprintf(
+            uid,
+            sizeof(uid),
+            "%X:%X:%X:%X",
+            id_list[flipfrid_state->current_uid][0],
+            id_list[flipfrid_state->current_uid][1],
+            id_list[flipfrid_state->current_uid][2],
+            id_list[flipfrid_state->current_uid][3]);
+        break;
+    default:
 
-    // Progress bar
-    char progress[MAX_REPEAT + 2];
-    strcat(progress, "[");
-    for(int i = 0; i < flipfrid_state->current_uid_repeat; i++) {
-        strcat(progress, "=");
+        break;
     }
-    for(int i = 0; i < (MAX_REPEAT - flipfrid_state->current_uid_repeat); i++) {
-        strcat(progress, "-");
-    }
-    strcat(progress, "]");
-    canvas_draw_str_aligned(canvas, 64, 52, AlignCenter, AlignBottom, progress);
 
-    emit(em_id_list[flipfrid_state->current_uid], flipfrid_state->emulator);
+    // Badge infos
+    canvas_set_font(canvas, FontSecondary);
+    canvas_draw_str_aligned(canvas, 64, 28, AlignCenter, AlignCenter, badge_type);
+
+    if(flipfrid_state->emitting) {
+        canvas_draw_str_aligned(canvas, 64, 42, AlignCenter, AlignCenter, uid);
+
+        // Progress bar
+        char progress[MAX_REPEAT + 2];
+        strcat(progress, "[");
+        for(int i = 0; i < flipfrid_state->current_uid_repeat; i++) {
+            strcat(progress, "=");
+        }
+        for(int i = 0; i < (MAX_REPEAT - flipfrid_state->current_uid_repeat); i++) {
+            strcat(progress, "-");
+        }
+        strcat(progress, "]");
+        canvas_draw_str_aligned(canvas, 64, 58, AlignCenter, AlignBottom, progress);
+    } else {
+        canvas_draw_str_aligned(
+            canvas, 64, 42, AlignCenter, AlignCenter, "Press OK to start/stop");
+    }
 
     release_mutex((ValueMutex*)ctx, flipfrid_state);
 }
 
 void flipfrid_input_callback(InputEvent* input_event, FuriMessageQueue* event_queue) {
     furi_assert(event_queue);
-    Event event = {.type = EventTypeKey, .input = *input_event};
-    furi_message_queue_put(event_queue, &event, FuriWaitForever);
+
+    FlipFridEvent event = {
+        .evt_type = EventTypeKey, .key = input_event->key, .input_type = input_event->type};
+    furi_message_queue_put(event_queue, &event, 25);
 }
 
 static void flipfrid_timer_callback(FuriMessageQueue* event_queue) {
     furi_assert(event_queue);
-    InputEvent ie;
-    ie.sequence = 0;
-    ie.type = InputTypePress;
-    ie.key = InputKeyOk;
-    Event event = {.type = EventTypeTick, .input = ie};
-    furi_message_queue_put(event_queue, &event, 0);
+
+    FlipFridEvent event = {
+        .evt_type = EventTypeTick, .key = InputKeyUp, .input_type = InputTypeRelease};
+    furi_message_queue_put(event_queue, &event, 25);
 }
 
 FlipFridApp::FlipFridApp() {
+}
+
+FlipFridApp::~FlipFridApp() {
 }
 
 // ENTRYPOINT
 void FlipFridApp::run() {
     // Input
     FURI_LOG_I(TAG, "Initializing input");
-    FuriMessageQueue* event_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
+    FuriMessageQueue* event_queue = furi_message_queue_alloc(8, sizeof(FlipFridEvent));
     FlipFridState* flipfrid_state = (FlipFridState*)malloc(sizeof(FlipFridState));
     ValueMutex flipfrid_state_mutex;
 
@@ -149,39 +212,101 @@ void FlipFridApp::run() {
     Gui* gui = (Gui*)furi_record_open(RECORD_GUI);
     gui_add_view_port(gui, view_port, GuiLayerFullscreen);
 
-    Event event;
+    // Init values
+    FlipFridEvent event;
+    flipfrid_state->emitting = false;
     flipfrid_state->current_uid = 0;
     flipfrid_state->current_uid_repeat = 0;
+    flipfrid_state->current_badge_type = LfrfidKeyType::KeyEM4100;
+
+    uint8_t badge_type_index = 0;
+    LfrfidKeyType badges_types[] = {
+        LfrfidKeyType::KeyEM4100,
+        LfrfidKeyType::KeyH10301,
+        LfrfidKeyType::KeyI40134,
+        LfrfidKeyType::KeyIoProxXSF,
+    };
 
     bool running = true;
     while(running) {
         // Get next event
-        FuriStatus event_status = furi_message_queue_get(event_queue, &event, 100);
+        FuriStatus event_status = furi_message_queue_get(event_queue, &event, 25);
 
         if(event_status == FuriStatusOk) {
-            if(event.type == EventTypeKey) {
-                FURI_LOG_D(TAG, "EventTypeKey");
-                // TODO: Find why event.input.key is always 10
-                FURI_LOG_D(TAG, "PRESS");
-                running = false;
-            } else if(event.type == EventTypeTick) {
-                FURI_LOG_D(TAG, "EventTypeTick");
-                // Loop 3 times each uid
-                flipfrid_state->current_uid_repeat++;
-                if(flipfrid_state->current_uid_repeat > MAX_REPEAT) {
-                    flipfrid_state->current_uid_repeat = 0;
-                    flipfrid_state->current_uid++;
-                    if(flipfrid_state->current_uid >= sizeof(em_id_list) / 5) {
-                        flipfrid_state->current_uid = 0;
+            if(event.evt_type == EventTypeKey) {
+                if(event.input_type == InputTypeShort) {
+                    switch(event.key) {
+                    case InputKeyUp:
+                    case InputKeyDown:
+                        // OSEF
+                        break;
+                    case InputKeyRight:
+                        // Next badge type
+                        flipfrid_state->emulator.stop();
+                        flipfrid_state->emitting = false;
+                        if(badge_type_index < (sizeof(badges_types) / sizeof(badges_types[0]))) {
+                            badge_type_index++;
+                            flipfrid_state->current_badge_type = badges_types[badge_type_index];
+                        }
+                        break;
+                    case InputKeyLeft:
+                        // Previous badge type
+                        flipfrid_state->emulator.stop();
+                        flipfrid_state->emitting = false;
+                        if(badge_type_index > 0) {
+                            badge_type_index--;
+                            flipfrid_state->current_badge_type = badges_types[badge_type_index];
+                        }
+                        break;
+                    case InputKeyOk:
+                        if(flipfrid_state->emitting) {
+                            flipfrid_state->emulator.stop();
+                            flipfrid_state->emitting = false;
+                        } else {
+                            flipfrid_state->current_uid_repeat = 0;
+                            flipfrid_state->current_uid = 0;
+                            flipfrid_state->current_badge_type =
+                                (LfrfidKeyType)((flipfrid_state->current_badge_type));
+                            flipfrid_state->emitting = true;
+                        }
+                        break;
+                    case InputKeyBack:
+                        flipfrid_state->emitting = false;
+                        running = false;
+                        break;
                     }
                 }
+            } else if(event.evt_type == EventTypeTick) {
+                // Emulate card
+
+                if(flipfrid_state->emitting) {
+                    // Loop max repeat
+                    if(flipfrid_state->current_uid_repeat == MAX_REPEAT) {
+                        flipfrid_state->current_uid_repeat = 0;
+
+                        // Next uid
+                        flipfrid_state->current_uid++;
+                        if(flipfrid_state->current_uid == sizeof(id_list) / 5) {
+                            flipfrid_state->current_uid = 0;
+                        }
+                    }
+
+                    emit(
+                        flipfrid_state->current_uid,
+                        flipfrid_state->emulator,
+                        flipfrid_state->current_badge_type);
+
+                    flipfrid_state->current_uid_repeat++;
+                }
+
+                view_port_update(view_port);
             }
-            // Update
-            view_port_update(view_port);
         }
     }
 
     // Cleanup
+    furi_timer_stop(timer);
+    furi_timer_free(timer);
     FURI_LOG_I(TAG, "Cleaning up");
     flipfrid_state->emulator.stop();
     free(flipfrid_state);
