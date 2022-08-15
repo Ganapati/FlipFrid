@@ -6,7 +6,7 @@
 #include "../lfrfid/helpers/rfid_timer_emulator.h"
 #include "flipfrid.h"
 
-#define MAX_REPEAT 3
+#define EMIT_STEPS 10
 #define TAG "FLIPFRID"
 
 uint8_t id_list[12][5] = {
@@ -46,20 +46,7 @@ typedef struct {
     LfrfidKeyType current_badge_type;
     uint8_t current_uid;
     uint8_t current_uid_repeat;
-    RfidTimerEmulator emulator;
 } FlipFridState;
-
-void emit(int index, RfidTimerEmulator emulator, LfrfidKeyType type) {
-    printf("%s", lfrfid_key_get_type_string(type));
-    printf(" ");
-    for(uint8_t i = 0; i < lfrfid_key_get_type_data_count(type); i++) {
-        printf("%02X", id_list[index][i]);
-    }
-    printf("\r\n");
-
-    emulator.stop();
-    emulator.start(type, id_list[index], lfrfid_key_get_type_data_count(type));
-}
 
 static void flipfrid_draw_callback(Canvas* const canvas, void* ctx) {
     const FlipFridState* flipfrid_state = (FlipFridState*)acquire_mutex((ValueMutex*)ctx, 100);
@@ -138,12 +125,12 @@ static void flipfrid_draw_callback(Canvas* const canvas, void* ctx) {
         canvas_draw_str_aligned(canvas, 64, 42, AlignCenter, AlignCenter, uid);
 
         // Progress bar
-        char progress[MAX_REPEAT + 2];
+        char progress[EMIT_STEPS + 2];
         strcat(progress, "[");
         for(int i = 0; i < flipfrid_state->current_uid_repeat; i++) {
             strcat(progress, "=");
         }
-        for(int i = 0; i < (MAX_REPEAT - flipfrid_state->current_uid_repeat); i++) {
+        for(int i = 0; i < (EMIT_STEPS - flipfrid_state->current_uid_repeat); i++) {
             strcat(progress, "-");
         }
         strcat(progress, "]");
@@ -217,6 +204,9 @@ void FlipFridApp::run() {
     flipfrid_state->current_uid = 0;
     flipfrid_state->current_uid_repeat = 0;
     flipfrid_state->current_badge_type = LfrfidKeyType::KeyEM4100;
+    RfidTimerEmulator* emulator;
+    emulator = new RfidTimerEmulator();
+    RfidTimerEmulator em = *emulator;
 
     uint8_t badge_type_index = 0;
     LfrfidKeyType badges_types[] = {
@@ -230,7 +220,6 @@ void FlipFridApp::run() {
     while(running) {
         // Get next event
         FuriStatus event_status = furi_message_queue_get(event_queue, &event, 25);
-
         if(event_status == FuriStatusOk) {
             if(event.evt_type == EventTypeKey) {
                 if(event.input_type == InputTypeShort) {
@@ -241,16 +230,15 @@ void FlipFridApp::run() {
                         break;
                     case InputKeyRight:
                         // Next badge type
-                        flipfrid_state->emulator.stop();
                         flipfrid_state->emitting = false;
-                        if(badge_type_index < (sizeof(badges_types) / sizeof(badges_types[0])-1)) {
+                        if(badge_type_index <
+                           (sizeof(badges_types) / sizeof(badges_types[0]) - 1)) {
                             badge_type_index++;
                             flipfrid_state->current_badge_type = badges_types[badge_type_index];
                         }
                         break;
                     case InputKeyLeft:
                         // Previous badge type
-                        flipfrid_state->emulator.stop();
                         flipfrid_state->emitting = false;
                         if(badge_type_index > 0) {
                             badge_type_index--;
@@ -259,7 +247,6 @@ void FlipFridApp::run() {
                         break;
                     case InputKeyOk:
                         if(flipfrid_state->emitting) {
-                            flipfrid_state->emulator.stop();
                             flipfrid_state->emitting = false;
                         } else {
                             flipfrid_state->current_uid_repeat = 0;
@@ -279,26 +266,36 @@ void FlipFridApp::run() {
                 // Emulate card
 
                 if(flipfrid_state->emitting) {
-                    // Loop max repeat
-                    if(flipfrid_state->current_uid_repeat == MAX_REPEAT) {
+                    
+                    if(flipfrid_state->current_uid_repeat == 0) {
+                        FURI_LOG_D(TAG, "Starting emulation %d", flipfrid_state->current_uid);
+                        em.start(
+                            flipfrid_state->current_badge_type,
+                            id_list[flipfrid_state->current_uid],
+                            lfrfid_key_get_type_data_count(flipfrid_state->current_badge_type));
+                        flipfrid_state->current_uid_repeat++;
+                    } else if(flipfrid_state->current_uid_repeat == EMIT_STEPS) {
+                        FURI_LOG_D(TAG, "Stop emulation %d", flipfrid_state->current_uid);
                         flipfrid_state->current_uid_repeat = 0;
+                        em.stop();
 
                         // Next uid
                         flipfrid_state->current_uid++;
                         if(flipfrid_state->current_uid == sizeof(id_list) / 5) {
                             flipfrid_state->current_uid = 0;
                         }
+                    } else {
+                        furi_delay_ms(100);
+                        flipfrid_state->current_uid_repeat++;
+                        FURI_LOG_D(
+                            TAG,
+                            "Starting emulation %d/%d",
+                            flipfrid_state->current_uid_repeat,
+                            EMIT_STEPS);
                     }
 
-                    emit(
-                        flipfrid_state->current_uid,
-                        flipfrid_state->emulator,
-                        flipfrid_state->current_badge_type);
-
-                    flipfrid_state->current_uid_repeat++;
+                    view_port_update(view_port);
                 }
-
-                view_port_update(view_port);
             }
         }
     }
@@ -306,8 +303,9 @@ void FlipFridApp::run() {
     // Cleanup
     furi_timer_stop(timer);
     furi_timer_free(timer);
+    em.stop();
+    free(emulator);
     FURI_LOG_I(TAG, "Cleaning up");
-    flipfrid_state->emulator.stop();
     free(flipfrid_state);
     gui_remove_view_port(gui, view_port);
     view_port_free(view_port);
