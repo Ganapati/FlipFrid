@@ -125,7 +125,7 @@ static void flipfrid_draw_callback(Canvas* const canvas, void* ctx) {
         canvas_draw_str_aligned(canvas, 64, 42, AlignCenter, AlignCenter, uid);
 
         // Progress bar
-        char progress[EMIT_STEPS + 2];
+        char progress[EMIT_STEPS + 2] = "";
         strcat(progress, "[");
         for(int i = 0; i < flipfrid_state->current_uid_repeat; i++) {
             strcat(progress, "=");
