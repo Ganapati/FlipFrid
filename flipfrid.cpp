@@ -293,9 +293,8 @@ void FlipFridApp::run() {
                             flipfrid_state->current_uid_repeat,
                             EMIT_STEPS);
                     }
-
-                    view_port_update(view_port);
                 }
+                view_port_update(view_port);
             }
         }
     }
